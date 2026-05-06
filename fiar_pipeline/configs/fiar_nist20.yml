@@ -1,0 +1,75 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# FIAR Pipeline — ICEBERG-Generate + Phase 3 Siamese Probe
+# Experiment: fragment-augmented analog discovery on NIST20 molecules
+# Run from: /data/nas-gpu/wang/tmach007/ms-pred/
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── ICEBERG-Generate ──────────────────────────────────────────────────────────
+iceberg:
+  # FragGNN checkpoint — nist or canopus variant
+  ckpt_path: "weights/nist_iceberg_generate.ckpt"
+
+  # Runtime
+  device:    "cuda:0"
+  top_k:     100          # max fragments per molecule
+  threshold: 0.0          # min atom-leaving probability (0.0 = keep all)
+
+  # Morgan fingerprint (must stay consistent across ETL + training)
+  compute_morgan_fp: true
+  morgan_radius:     2
+  morgan_nbits:      2048
+
+  # Path to the cache produced by etl/extract_fragment_cache.py
+  # Set to null to disable fragment features entirely.
+  fragment_cache_path: "fiar_pipeline/data/fragment_cache.pt"
+
+  # DataLoader padding dimension (must equal top_k above)
+  max_k: 100
+
+  # ETL-only
+  etl_batch_size: 32
+
+
+# ── Data sources ──────────────────────────────────────────────────────────────
+data:
+  # From SpectralSimilarityPredictor
+  mol_df:    "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/mass_spec_gym_data/mol_df.pkl"
+  spec_df:   "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/mass_spec_gym_data/spec_df.pkl"
+  graphs:    "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/mass_spec_gym_data/phase3_graphs_lpe.pt"
+  pairs_train: "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/data_splits/stratified_binary_07_dataset_train.feather"
+  pairs_val:   "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/data_splits/stratified_binary_07_dataset_val.feather"
+
+  # Path to SpectralSimilarityPredictor/data_loaders/fiar/
+  # Needed to import Phase2EdgeDataset + phase2_collate_fn
+  phase2_loader_dir: "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/data_loaders/fiar"
+
+
+# ── Training ──────────────────────────────────────────────────────────────────
+train:
+  phase2_checkpoint:  "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/trained_model/fiar/best.pt"
+  output_dir:         "fiar_pipeline/results/phase3_probe"
+  device:             "cuda:0"
+  gpu_id:             0
+  batch_size:         256
+  epochs:             10
+  learning_rate:      1.0e-3
+  focal_alpha:        0.75
+  focal_gamma:        3.0
+  wandb_project:      "fiar-iceberg-phase3"
+
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  embed_dim:    768
+  num_heads:    8
+  max_fragments: 10   # Phase2 motif slots (unchanged from existing pipeline)
+
+
+# ── Phase 3 ColBERT head ──────────────────────────────────────────────────────
+# Controls the SymmetricColBERTHead training only.
+# max_fragments here overrides iceberg.max_k for Phase 3 training — the ETL
+# cache holds top_k=100 fragments but we only feed the top 50 to the ColBERT
+# head (100-fragment ColBERT attention is too expensive and the tail fragments
+# carry negligible prob_gen signal).
+phase3:
+  max_fragments: 50
