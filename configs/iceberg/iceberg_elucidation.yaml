@@ -46,3 +46,29 @@ molgpu05:
 
 molgpu06:
   clone: molgpu01
+
+yuzu:
+  python_path: '/data/nas-gpu/wang/tmach007/ms-pred/y/envs/ms-gen/bin/python'
+  # gen_ckpt: '/data/nas-gpu/wang/tmach007/ms-pred/weights/canopus_iceberg_generate.ckpt'
+  gen_ckpt: '/data/nas-gpu/wang/tmach007/ms-pred/weights/nist_iceberg_generate.ckpt' # nist weights
+  # inten_ckpt: '/data/nas-gpu/wang/tmach007/ms-pred/weights/canopus_iceberg_score.ckpt'
+  inten_ckpt: '/data/nas-gpu/wang/tmach007/ms-pred/weights/nist_iceberg_score.ckpt' # nist weights
+  cuda_devices: [0, 1]
+  batch_size: 32
+  num_workers: 8
+
+  # ICEBERG Parameters (Keep these defaults)
+  sparse_k: 100
+  max_nodes: 100
+  threshold: 0.0
+  binned_out: False
+  ppm: 20
+  num_bins: 15000
+  dist_func: 'entropy'
+
+mingxun-gpu2:
+  clone: yuzu
+  cuda_devices: [0]
+
+sour-orange:
+  clone: yuzu

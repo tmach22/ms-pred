@@ -157,6 +157,7 @@ def predict():
             for colli_eng in collision_energies:
                 colli_eng_val = common.collision_energy_to_float(colli_eng)  # str to float
                 if math.isnan(colli_eng_val):  # skip collision_energy == nan (no collision energy recorded)
+                    print(f"Found entry with empty collision energy")
                     continue
                 tup_to_process.append((smi, name, colli_eng_val, adduct, instrument, precursor_mz,
                                        f"pred_{name}/ikey {inchikey}/collision {colli_eng}"))
@@ -271,8 +272,7 @@ def predict():
 
 if __name__ == "__main__":
     import time
-
     start_time = time.time()
     predict()
     end_time = time.time()
-    logging.info(f"Program finished in: {end_time - start_time} seconds")
+    # logging.info(f"Program finished in: {end_time - start_time} seconds")
