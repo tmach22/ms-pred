@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TARGET_ROOT="/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib"
+TARGET_ROOT="/home/user/ms-pred/data/MSnLib"
 ZENODO_LIBS_ID="11163380"   # processed .mgf + .json libraries
 ZENODO_MZML_ID="10966280"   # raw .mzML pos + neg
 MASSIVE_ACC="MSV000094528"

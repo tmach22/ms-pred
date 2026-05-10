@@ -27,10 +27,9 @@ Output schema
 
 Usage
 -----
-cd /data/nas-gpu/wang/tmach007/ms-pred
+cd /home/user/ms-pred
 
-/data/nas-gpu/wang/tmach007/ms-pred/y/envs/ms-gen/bin/python \\
-    fiar_pipeline/scripts/preprocess_msnlib.py
+python fiar_pipeline/scripts/preprocess_msnlib.py
 """
 
 from __future__ import annotations
@@ -48,8 +47,8 @@ import pandas as pd
 from tqdm import tqdm
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-JSON_DIR = Path("/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/libraries/json")
-OUTPUT   = Path("/data/nas-gpu/wang/tmach007/ms-pred/data/ms3_edge_labels.feather")
+JSON_DIR = Path("/home/user/ms-pred/data/MSnLib/libraries/json")
+OUTPUT   = Path("/home/user/ms-pred/data/ms3_edge_labels.feather")
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 PURITY_GATE  = 0.70
