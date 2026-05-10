@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# FIAR Pipeline — ICEBERG-Generate + Phase 3 Siamese Probe
+# FIAR Pipeline — ICEBERG-Generate + Phase 3/4 Siamese Probe
 # Experiment: fragment-augmented analog discovery on NIST20 molecules
 # Run from: /data/nas-gpu/wang/tmach007/ms-pred/
 # ══════════════════════════════════════════════════════════════════════════════
@@ -47,7 +47,11 @@ data:
 # ── Training ──────────────────────────────────────────────────────────────────
 train:
   phase2_checkpoint:  "/data/nas-gpu/wang/tmach007/SpectralSimilarityPredictor/trained_model/fiar/best.pt"
+  
+  # Directory Separation: Phase 3 vs Phase 4
   output_dir:         "fiar_pipeline/results/phase3_probe"
+  phase4_output_dir:  "fiar_pipeline/results/phase4_probe"
+  
   device:             "cuda:0"
   gpu_id:             0
   batch_size:         256
@@ -66,10 +70,16 @@ model:
 
 
 # ── Phase 3 ColBERT head ──────────────────────────────────────────────────────
-# Controls the SymmetricColBERTHead training only.
-# max_fragments here overrides iceberg.max_k for Phase 3 training — the ETL
-# cache holds top_k=100 fragments but we only feed the top 50 to the ColBERT
-# head (100-fragment ColBERT attention is too expensive and the tail fragments
-# carry negligible prob_gen signal).
 phase3:
   max_fragments: 50
+
+
+# ── Phase 4 ColBERT head ──────────────────────────────────────────────────────
+# Dedicated namespace for the Bidirectional Mass-Weighted ColBERT updates.
+phase4:
+  sinkhorn_eps: 0.01
+  sinkhorn_iters: 20
+  max_fragments: 50
+  num_heads: 8
+  rho_init: 1.0     # Initial Unbalanced OT mass forgiveness penalty
+  tau_init: 5.0     # Initial steepness for the Exponential Cost Gate

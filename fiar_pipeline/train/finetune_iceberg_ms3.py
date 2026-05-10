@@ -55,10 +55,12 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
+import time
+
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 
 # ── Repo path injection ────────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -89,6 +91,22 @@ def load_frag_gnn(ckpt_path: str, device: torch.device) -> FragGNN:
     state = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state, strict=True)
     return model
+
+
+def tree_proc_kwargs_from_ckpt(ckpt_path: str) -> dict:
+    """Extract TreeProcessor kwargs that match a FragGNN checkpoint's hparams.
+
+    The DGL graphs produced by TreeProcessor must have the same node-feature
+    dimensionality that the checkpoint's GNN was trained with.  The three
+    relevant hparams are pe_embed_k, add_hs, and embed_elem_group.
+    """
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    hp = ckpt.get("hyper_parameters", {})
+    return {
+        "pe_embed_k":       int(hp.get("pe_embed_k", 0)),
+        "add_hs":           bool(hp.get("add_hs", False)),
+        "embed_elem_group": bool(hp.get("embed_elem_group", False)),
+    }
 
 
 def freeze_backbone(model: FragGNN) -> None:
@@ -225,33 +243,64 @@ def main(args: argparse.Namespace) -> None:
 
     # ── Dataset ───────────────────────────────────────────────────────────────
     print(f"[*] Loading dataset: {args.feather}")
+    tp_kwargs = tree_proc_kwargs_from_ckpt(args.ckpt_path)
+    print(f"    TreeProcessor kwargs (from checkpoint): {tp_kwargs}")
     full_dataset = MS3EdgeDataset(
-        feather_path = args.feather,
-        max_mol_size = args.max_mol_size,
-        ion_mode     = args.ion_mode,
+        feather_path          = args.feather,
+        max_mol_size          = args.max_mol_size,
+        ion_mode              = args.ion_mode,
+        tree_processor_kwargs = tp_kwargs,
     )
     print(f"    {len(full_dataset):,} edges after size filter")
 
-    val_n   = max(1, int(len(full_dataset) * args.val_frac))
-    train_n = len(full_dataset) - val_n
-    train_ds, val_ds = random_split(full_dataset, [train_n, val_n])
+    # Optional row cap: useful for smoke tests or early stopping experiments
+    if args.max_rows is not None and args.max_rows < len(full_dataset):
+        full_dataset.df = full_dataset.df.iloc[: args.max_rows].reset_index(drop=True)
+        print(f"    Capped to {len(full_dataset):,} rows (--max_rows {args.max_rows})")
 
+    # SMILES-level split: all rows for a SMILES go exclusively to train or val.
+    # This (a) prevents data leakage and (b) preserves the SMILES-sorted row
+    # order within each subset so per-worker engine/graph caches warm up
+    # quickly (consecutive indices share the same molecule → high hit rate).
+    all_smiles = full_dataset.df["smiles"].unique()
+    rng = np.random.default_rng(42)
+    rng.shuffle(all_smiles)
+    n_val_smi   = max(1, int(len(all_smiles) * args.val_frac))
+    val_smiles  = set(all_smiles[:n_val_smi])
+
+    train_idx = full_dataset.df.index[~full_dataset.df["smiles"].isin(val_smiles)].tolist()
+    val_idx   = full_dataset.df.index[ full_dataset.df["smiles"].isin(val_smiles)].tolist()
+
+    # Wrap as Subset objects.  Indices are already sorted by SMILES (the df was
+    # sorted in MS3EdgeDataset.__init__), so Subset preserves that ordering.
+    train_ds = Subset(full_dataset, train_idx)
+    val_ds   = Subset(full_dataset, val_idx)
+    print(f"    Train: {len(train_ds):,} rows  |  Val: {len(val_ds):,} rows  "
+          f"(SMILES-level split, val_frac≈{args.val_frac:.0%})")
+
+    # shuffle=False: rows are SMILES-sorted so consecutive items within a
+    # worker share the same molecule → engine/graph cache hit rate ≈ 1 - 1/37.
+    # persistent_workers keeps those caches alive across epochs.
     train_loader = DataLoader(
         train_ds,
-        batch_size  = args.batch_size,
-        shuffle     = True,
-        collate_fn  = MS3EdgeDataset.collate_fn,
-        num_workers = args.num_workers,
-        pin_memory  = True,
-        drop_last   = True,
+        batch_size         = args.batch_size,
+        shuffle            = False,
+        collate_fn         = MS3EdgeDataset.collate_fn,
+        num_workers        = args.num_workers,
+        pin_memory         = True,
+        drop_last          = True,
+        persistent_workers = args.num_workers > 0,
+        prefetch_factor    = 4 if args.num_workers > 0 else None,
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size  = args.batch_size * 2,
-        shuffle     = False,
-        collate_fn  = MS3EdgeDataset.collate_fn,
-        num_workers = args.num_workers,
-        pin_memory  = True,
+        batch_size         = args.batch_size * 2,
+        shuffle            = False,
+        collate_fn         = MS3EdgeDataset.collate_fn,
+        num_workers        = args.num_workers,
+        pin_memory         = True,
+        persistent_workers = args.num_workers > 0,
+        prefetch_factor    = 4 if args.num_workers > 0 else None,
     )
 
     # ── Models ────────────────────────────────────────────────────────────────
@@ -300,6 +349,7 @@ def main(args: argparse.Namespace) -> None:
           f"(early stop patience={args.patience})\n")
 
     for epoch in range(1, args.epochs + 1):
+        t_epoch = time.perf_counter()
         train_stats = _run_epoch(
             active_model, oracle_model, train_loader, device,
             optimizer, loss_gs, loss_pu, loss_kl,
@@ -311,13 +361,15 @@ def main(args: argparse.Namespace) -> None:
             args.w_gs, args.w_pu, args.w_kl, is_train=False,
         )
         scheduler.step()
+        epoch_secs = time.perf_counter() - t_epoch
 
         lr_now = scheduler.get_last_lr()[0]
         print(
             f"Epoch {epoch:3d}/{args.epochs} | "
             f"train loss={train_stats['loss']:.4f} "
             f"(gs={train_stats['gs']:.4f} pu={train_stats['pu']:.4f} kl={train_stats['kl']:.4f}) | "
-            f"val gs={val_stats['gs']:.4f} | lr={lr_now:.2e}"
+            f"val gs={val_stats['gs']:.4f} | lr={lr_now:.2e} | "
+            f"time={epoch_secs/60:.1f}min"
         )
 
         history.append({"epoch": epoch, "train": train_stats, "val": val_stats})
@@ -375,6 +427,9 @@ def _cli() -> argparse.Namespace:
                    help="Maximum heavy-atom count per molecule (default: %(default)s)")
     p.add_argument("--val_frac",     type=float, default=0.10,
                    help="Fraction of data held out for validation (default: %(default)s)")
+    p.add_argument("--max_rows",     type=int,   default=None,
+                   help="Cap dataset to this many rows (None = all rows). Useful "
+                        "for smoke tests: e.g. --max_rows 200000 gives ~7min epochs.")
     # Training
     p.add_argument("--epochs",       type=int,   default=30)
     p.add_argument("--batch_size",   type=int,   default=64)
@@ -382,7 +437,7 @@ def _cli() -> argparse.Namespace:
     p.add_argument("--weight_decay", type=float, default=1e-5)
     p.add_argument("--patience",     type=int,   default=5,
                    help="Early-stopping patience in epochs (default: %(default)s)")
-    p.add_argument("--num_workers",  type=int,   default=4)
+    p.add_argument("--num_workers",  type=int,   default=16)
     p.add_argument("--device",       default="cuda:0")
     # Loss weights
     p.add_argument("--w_gs",         type=float, default=1.0,
