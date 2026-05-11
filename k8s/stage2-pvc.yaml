@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stage2-pvc
+  labels:
+    user: tejas
+    project: fiar-ms3
+    stage: distillation-tensors
+spec:
+  storageClassName: rook-cephfs   # RWX — shuttle and job can both mount simultaneously
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi                # code ~1MB + stage1 parquets 28MB + master index ~10MB + output ~28MB

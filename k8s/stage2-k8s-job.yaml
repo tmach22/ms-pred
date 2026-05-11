@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stage2-distillation-tensors
+  labels:
+    user: tejas
+    project: fiar-ms3
+    stage: distillation-tensors
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 7200    # 2h cap — 218-file pandas merge completes in <5 min
+  ttlSecondsAfterFinished: 86400 # auto-clean after 1 day
+  template:
+    metadata:
+      labels:
+        user: tejas
+        project: fiar-ms3
+        stage: distillation-tensors
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: stage2
+        image: python:3.11-slim
+        workingDir: /workspace/code/fiar_pipeline/etl
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -e
+
+          echo "=== Installing dependencies ==="
+          pip install --quiet pandas pyarrow
+
+          echo "=== Creating output directory ==="
+          mkdir -p /workspace/data/MSnLib/distillation_tensors
+
+          echo "=== Running parallel distillation tensor preparer (8 workers) ==="
+          python -u prepare_distillation_tensors_parallel.py \
+            --stage1_dir   /workspace/data/MSnLib/processed_stage1/ \
+            --master_index /workspace/data/MSnLib/master_metadata_index.parquet \
+            --outdir       /workspace/data/MSnLib/distillation_tensors/ \
+            --workers      8
+
+          echo "=== Stage 2 output ==="
+          ls -lh /workspace/data/MSnLib/distillation_tensors/ | head -20
+          echo "Total files: $(ls /workspace/data/MSnLib/distillation_tensors/*.parquet 2>/dev/null | wc -l)"
+        resources:
+          requests:
+            cpu: "8"
+            memory: "32Gi"
+          limits:
+            cpu: "8"
+            memory: "32Gi"
+        volumeMounts:
+        - name: stage2-data
+          mountPath: /workspace
+      volumes:
+      - name: stage2-data
+        persistentVolumeClaim:
+          claimName: stage2-pvc

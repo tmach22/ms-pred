@@ -27,14 +27,24 @@ def build_master_index(json_dir, output_parquet):
                 try:
                     data = json.loads(line)
 
+                    # Only index MS2-level records: stage1 scan_number = MS2 parent scan
+                    if data.get("ms_level") != 2:
+                        continue
+
                     # Handle cases where scan_number is a list (merged scans) vs single int
                     scans = data.get("scan_number", [])
                     if isinstance(scans, int):
                         scans = [scans]
 
-                    # Extract the base mzML filename from the feature_id
+                    # Prefer raw_file_name (targetmol format); fall back to feature_id (older format)
+                    raw_file = data.get("raw_file_name", "")
                     feature_id = str(data.get("feature_id", ""))
-                    mzml_file = feature_id.split(".mzML")[0] + ".mzML" if ".mzML" in feature_id else "UNKNOWN"
+                    if raw_file:
+                        mzml_file = raw_file
+                    elif ".mzML" in feature_id:
+                        mzml_file = feature_id.split(".mzML")[0] + ".mzML"
+                    else:
+                        continue  # skip unresolvable records
 
                     for scan in scans:
                         records.append({
