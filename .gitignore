@@ -1,6 +1,10 @@
 # User added
 *oracle*
 /data/retrieval
+data/MSnLib/libraries/
+data/MSnLib/raw_scans/
+data/MSnLib/massive/
+weights/
 scratch
 default.profraw
 *.swp

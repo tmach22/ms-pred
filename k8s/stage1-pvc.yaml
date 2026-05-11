@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stage1-pvc
+  labels:
+    user: tejas
+    project: fiar-ms3
+    stage: tensorizer
+spec:
+  storageClassName: rook-cephfs   # RWX — allows parallel pod access if needed later
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 30Gi               # ~4GB extracted mzML (targetmol batch) + parquet outputs

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fiar-ms3-pvc
+  labels:
+    user: tejas
+    project: fiar-ms3
+spec:
+  storageClassName: rook-ceph-block-central
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

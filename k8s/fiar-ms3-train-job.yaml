@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fiar-ms3-train
+  labels:
+    user: tejas
+    project: fiar-ms3
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 172800   # 48h — 30 epochs on 1.8M edges can take ~7-10h
+  ttlSecondsAfterFinished: 86400  # auto-clean after 1 day
+  template:
+    metadata:
+      labels:
+        user: tejas
+        project: fiar-ms3
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: pytorch/pytorch:2.1.2-cuda12.1-cudnn8-devel
+        workingDir: /workspace
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -e
+          echo "=== Installing DGL (CUDA 12.1) ==="
+          pip install dgl -f https://data.dgl.ai/wheels/cu121/repo.html
+
+          echo "=== Installing PyG (PyTorch 2.1 + CUDA 12.1) ==="
+          pip install torch-scatter torch-sparse torch-cluster torch-geometric \
+            -f https://data.pyg.org/whl/torch-2.1.2+cu121.html
+
+          echo "=== Installing ms-pred requirements ==="
+          pip install rdkit
+          pip install -r /workspace/code/requirements.txt
+
+          echo "=== Starting Experiment 1: ICEBERG-Generate MS3 Fine-Tuning ==="
+          python -u /workspace/code/fiar_pipeline/train/finetune_iceberg_ms3.py \
+            --feather       /workspace/data/ms3_edge_labels.feather \
+            --ckpt_path     /workspace/weights/nist_iceberg_generate.ckpt \
+            --output_dir    /workspace/results/iceberg_ms3 \
+            --epochs        30 \
+            --batch_size    64 \
+            --lr            1e-4 \
+            --w_gs          1.0 \
+            --w_pu          0.5 \
+            --w_kl          0.3 \
+            --device        cuda:0
+        resources:
+          requests:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "28Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: dshm
+          mountPath: /dev/shm
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: fiar-ms3-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - NVIDIA-GeForce-RTX-3090
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - us-central

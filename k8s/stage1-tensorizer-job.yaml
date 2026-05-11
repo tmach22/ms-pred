@@ -1,0 +1,75 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stage1-tensorizer
+  labels:
+    user: tejas
+    project: fiar-ms3
+    stage: tensorizer
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 86400     # 24h cap — full targetmol batch fits in ~1h
+  ttlSecondsAfterFinished: 86400   # auto-clean after 1 day
+  template:
+    metadata:
+      labels:
+        user: tejas
+        project: fiar-ms3
+        stage: tensorizer
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: tensorizer
+        image: python:3.11-slim
+        workingDir: /workspace
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -e
+
+          echo "=== Installing dependencies ==="
+          pip install --quiet pyopenms numpy pandas pyarrow tqdm
+
+          echo "=== Installing system tools ==="
+          apt-get update -qq && apt-get install -y -qq wget unzip \
+            libglib2.0-0 libgomp1 libgl1
+
+          echo "=== Creating directories ==="
+          mkdir -p /workspace/raw_scans/positive /workspace/processed_stage1
+
+          # Download only if not already extracted from a previous run
+          N=$(find /workspace/raw_scans/positive -name "*.mzML" 2>/dev/null | wc -l)
+          if [ "$N" -eq 0 ]; then
+            echo "=== Downloading mzML batch from Zenodo (~555MB) ==="
+            wget -q --show-progress \
+              "https://zenodo.org/api/records/15683784/files/mzml_20241120_pluskal_targetmolnphts_MSn_positive.zip/content" \
+              -O /tmp/positive.zip
+            echo "=== Extracting mzML files ==="
+            unzip -j /tmp/positive.zip -d /workspace/raw_scans/positive/
+            rm /tmp/positive.zip
+          fi
+          N=$(find /workspace/raw_scans/positive -name "*.mzML" | wc -l)
+          echo "=== $N .mzML files ready in /workspace/raw_scans/positive/ ==="
+
+          echo "=== Running parallel tensorizer (8 workers) ==="
+          python -u /workspace/code/fiar_pipeline/etl/tensorizer_parallel.py \
+            --mzml_dir /workspace/raw_scans/positive/ \
+            --outdir   /workspace/processed_stage1/ \
+            --workers  8
+
+          echo "=== Stage 1 output ==="
+          ls -lh /workspace/processed_stage1/
+        resources:
+          requests:
+            cpu: "8"
+            memory: "16Gi"
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+        volumeMounts:
+        - name: stage1-data
+          mountPath: /workspace
+      volumes:
+      - name: stage1-data
+        persistentVolumeClaim:
+          claimName: stage1-pvc
