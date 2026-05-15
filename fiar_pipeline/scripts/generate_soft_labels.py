@@ -85,16 +85,17 @@ def process_batch(batch, scalpel, cpu_pool, device, temperature):
 
 
 def main():
-    TRAIN_PATH  = "/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/splits_v2/train.parquet"
-    OUTPUT_PATH = "/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/splits_v2/train_soft_labels.parquet"
+    TRAIN_PATH  = "/data/nas-gpu/wang/tmach007/data/MSnLib/splits_v2/train.parquet"
+    OUTPUT_PATH = "/data/nas-gpu/wang/tmach007/data/MSnLib/splits_v2/train_soft_labels.parquet"
     CKPT_PATH   = "/data/nas-gpu/wang/tmach007/ms-pred/weights/nist_iceberg_generate.ckpt"
 
     TEMPERATURE = 0.1
     BATCH_SIZE  = 128
     MAX_BATCHES = 100
 
-    # Hardware-specific constraint for i7-9700K (8 cores, 8 threads)
-    CPU_WORKERS = 8
+    CPU_WORKERS = 20
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
 
     device   = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cpu_pool = mp.Pool(processes=CPU_WORKERS)
