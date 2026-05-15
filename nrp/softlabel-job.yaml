@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ms-pred-softlabel-v1
+  namespace: wang-bioinf
+spec:
+  completionMode: Indexed   # K8s injects JOB_COMPLETION_INDEX (0..7) into each pod
+  completions: 8
+  parallelism: 8            # all 8 shards run simultaneously → ~3-4h wall-clock
+  backoffLimit: 2
+  activeDeadlineSeconds: 21600   # 6h hard cap — generous over expected ~4h
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: softlabel
+        # TODO: replace with your built image after: docker build + docker push
+        image: tmach22/ms-pred-softlabel:latest
+        imagePullPolicy: Always
+        command:
+        - python
+        - -u
+        - /opt/ms-pred/fiar_pipeline/scripts/generate_soft_labels_nrp.py
+        env:
+        - name: NUM_SHARDS
+          value: "8"
+        - name: CPU_WORKERS
+          value: "20"
+        # JOB_COMPLETION_INDEX is injected automatically by Kubernetes
+        resources:
+          requests:
+            cpu: "20"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "20"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: ms-pred-softlabel-pvc
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - NVIDIA-A10               # 24 GB VRAM — 35 free right now
+                - NVIDIA-GeForce-RTX-3090  # 24 GB VRAM — 35 free right now
+                - NVIDIA-RTX-A6000         # 48 GB VRAM — 28 free (fallback)
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values: ["us-west"]   # co-located with rook-cephfs

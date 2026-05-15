@@ -1,0 +1,36 @@
+# Build image for generate_soft_labels_nrp.py on NRP Nautilus
+# Base: PyTorch 2.1.0 + CUDA 12.1 (matches ms-gen conda env)
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
+
+# Build tools needed for Cython extension in ms-pred
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ build-essential git && \
+    rm -rf /var/lib/apt/lists/*
+
+# RDKit (required by ms_pred.magma.fragmentation.FragmentEngine)
+RUN pip install --no-cache-dir rdkit
+
+# Core scientific stack
+RUN pip install --no-cache-dir \
+    cython \
+    numpy \
+    pandas \
+    scipy \
+    scikit-learn \
+    tqdm \
+    omegaconf \
+    pathos \
+    pytorch-lightning==1.9.0 \
+    pyarrow \
+    fastparquet
+
+# Clone and install ms-pred (builds Cython massformer extension)
+RUN git clone https://github.com/tmach22/ms-pred.git /opt/ms-pred
+WORKDIR /opt/ms-pred
+RUN pip install --no-cache-dir -e .
+
+# fiar_pipeline lives at the repo root — add to PYTHONPATH
+ENV PYTHONPATH="/opt/ms-pred:${PYTHONPATH}"
+
+# Working directory matches PVC mount
+WORKDIR /workspace
