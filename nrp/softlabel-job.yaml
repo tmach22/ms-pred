@@ -1,33 +1,44 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-softlabel-v1
+  name: ms-pred-softlabel-v2
   namespace: wang-bioinf
 spec:
-  completionMode: Indexed   # K8s injects JOB_COMPLETION_INDEX (0..7) into each pod
+  completionMode: Indexed
   completions: 8
-  parallelism: 8            # all 8 shards run simultaneously → ~3-4h wall-clock
+  parallelism: 8
   backoffLimit: 2
-  activeDeadlineSeconds: 21600   # 6h hard cap — generous over expected ~4h
+  activeDeadlineSeconds: 28800   # 8h hard cap (full dataset / 8 shards ~3-4h expected)
   ttlSecondsAfterFinished: 86400
   template:
     spec:
       restartPolicy: Never
       containers:
       - name: softlabel
-        # TODO: replace with your built image after: docker build + docker push
-        image: tmach22/ms-pred-softlabel:latest
-        imagePullPolicy: Always
-        command:
-        - python
-        - -u
-        - /opt/ms-pred/fiar_pipeline/scripts/generate_soft_labels_nrp.py
+        image: pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
+        imagePullPolicy: IfNotPresent
+        workingDir: /workspace
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -e
+          echo "=== Installing dependencies ==="
+          pip install --no-cache-dir \
+            rdkit \
+            "pytorch-lightning==1.9.0" \
+            dgl -f https://data.dgl.ai/wheels/cu121/repo.html \
+            omegaconf tqdm pyarrow pandas numpy scikit-learn pathos
+
+          echo "=== Setting PYTHONPATH ==="
+          export PYTHONPATH="/workspace/code:/workspace/code/src:${PYTHONPATH}"
+
+          echo "=== Running shard ${JOB_COMPLETION_INDEX} / 8 ==="
+          python -u /workspace/code/fiar_pipeline/scripts/generate_soft_labels_nrp.py
         env:
         - name: NUM_SHARDS
           value: "8"
         - name: CPU_WORKERS
           value: "20"
-        # JOB_COMPLETION_INDEX is injected automatically by Kubernetes
         resources:
           requests:
             cpu: "20"
@@ -40,10 +51,16 @@ spec:
         volumeMounts:
         - name: workspace
           mountPath: /workspace
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: workspace
         persistentVolumeClaim:
           claimName: ms-pred-softlabel-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -52,13 +69,14 @@ spec:
               - key: nvidia.com/gpu.product
                 operator: In
                 values:
-                - NVIDIA-A10               # 24 GB VRAM — 35 free right now
-                - NVIDIA-GeForce-RTX-3090  # 24 GB VRAM — 35 free right now
-                - NVIDIA-RTX-A6000         # 48 GB VRAM — 28 free (fallback)
+                - NVIDIA-A10               # 24 GB VRAM, 34 nodes across east+central
+                - NVIDIA-GeForce-RTX-3090  # 24 GB VRAM, 49 nodes across west+central+east
+                - NVIDIA-RTX-A6000         # 48 GB VRAM, fallback
+                - NVIDIA-L40               # 48 GB VRAM, fallback
           preferredDuringSchedulingIgnoredDuringExecution:
           - weight: 100
             preference:
               matchExpressions:
               - key: topology.kubernetes.io/region
                 operator: In
-                values: ["us-west"]   # co-located with rook-cephfs
+                values: ["us-west"]

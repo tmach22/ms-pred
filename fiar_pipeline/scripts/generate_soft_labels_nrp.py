@@ -131,10 +131,6 @@ def main():
     all_results = []
 
     for step, batch in enumerate(tqdm(dataloader, desc="Evaluating Candidates")):
-        if MAX_BATCHES and step >= MAX_BATCHES:
-            print(f"\nReached debug limit of {MAX_BATCHES} batches. Stopping generation.")
-            break
-
         batch_results = process_batch(batch, scalpel, cpu_pool, device, TEMPERATURE)
         all_results.extend(batch_results)
 
