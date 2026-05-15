@@ -6,6 +6,25 @@ data/MSnLib/raw_scans/
 data/MSnLib/massive/
 weights/
 scratch
+
+# Large data files — hosted on HuggingFace Hub
+data/MSnLib/splits_v2/train.parquet
+data/MSnLib/splits_v2/train_soft_labels.parquet
+
+# Large intermediate/processed data — not needed for generation script
+data/MSnLib/processed_stage1_v2/
+data/MSnLib/distillation_tensors_v2/
+data/MSnLib/reward_scaled_tensors/
+data/ms3_edge_labels.feather
+
+# Giant feature caches
+fiar_pipeline/data/
+
+# Conda environment
+y/
+
+# Run logs
+fetcher_nohup.out
 default.profraw
 *.swp
 .DS_STORE

@@ -55,8 +55,13 @@ class SinkhornFiLMProbe(nn.Module):
         self.tau = nn.Parameter(torch.tensor(tau_init, dtype=torch.float32))
         self.rho_raw = nn.Parameter(torch.tensor(rho_init, dtype=torch.float32))
 
-        # 4. The Multi-Head Wasserstein Probe
-        self.wasserstein_probe = nn.Linear(self.num_heads, 1)
+        # 4. The Multi-Head Non-Linear Metric Probe
+        # Upgraded to bend the latent space and separate compressed distributions
+        self.wasserstein_probe = nn.Sequential(
+            nn.Linear(self.num_heads, 16),
+            nn.GELU(),
+            nn.Linear(16, 1)
+        )
 
     def _compute_gated_multihead_cost(self, E_A: torch.Tensor, E_B: torch.Tensor) -> torch.Tensor:
         """
