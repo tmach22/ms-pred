@@ -1,13 +1,13 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-softlabel-v2
+  name: ms-pred-softlabel-v11
   namespace: wang-bioinf
 spec:
   completionMode: Indexed
   completions: 8
   parallelism: 8
-  backoffLimit: 2
+  backoffLimit: 12
   activeDeadlineSeconds: 28800   # 8h hard cap (full dataset / 8 shards ~3-4h expected)
   ttlSecondsAfterFinished: 86400
   template:
@@ -22,12 +22,40 @@ spec:
         args:
         - |
           set -e
-          echo "=== Installing dependencies ==="
+          echo "=== CUDA sanity check ==="
+          python3 -c "import torch,sys; torch.zeros(1).cuda(); print('CUDA OK:', torch.cuda.get_device_name(0))" || (echo "CUDA unavailable, failing fast for reschedule"; exit 1)
+          echo "=== Installing system libs ==="
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc g++ \
+            libxrender1 libxext6 libx11-6 \
+            libgraphviz-dev graphviz \
+            libcairo2-dev pkg-config \
+            && rm -rf /var/lib/apt/lists/*
+
+          echo "=== Installing PyG CUDA 12.1 wheels ==="
+          pip install --no-cache-dir \
+            torch-scatter torch-sparse torch-geometric \
+            -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
+
+          echo "=== Installing DGL 1.1.3 ==="
+          pip install --no-cache-dir \
+            "dgl==1.1.3" \
+            -f https://data.dgl.ai/wheels/cu121/repo.html
+
+          echo "=== Installing ms-pred environment ==="
           pip install --no-cache-dir \
             rdkit \
             "pytorch-lightning==1.9.0" \
-            dgl -f https://data.dgl.ai/wheels/cu121/repo.html \
-            omegaconf tqdm pyarrow pandas numpy scikit-learn pathos
+            omegaconf tqdm pyarrow pandas numpy \
+            scikit-learn pathos \
+            h5py matplotlib seaborn einops \
+            "ray[tune]" \
+            pubchempy lightgbm \
+            msbuddy CairoSVG ipdb
+
+          echo "=== Installing optional graph packages ==="
+          pip install --no-cache-dir pygmtools pygraphviz || true
 
           echo "=== Setting PYTHONPATH ==="
           export PYTHONPATH="/workspace/code:/workspace/code/src:${PYTHONPATH}"
@@ -38,15 +66,15 @@ spec:
         - name: NUM_SHARDS
           value: "8"
         - name: CPU_WORKERS
-          value: "20"
+          value: "8"
         resources:
           requests:
-            cpu: "20"
-            memory: "48Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
           limits:
-            cpu: "20"
-            memory: "48Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: workspace
@@ -69,10 +97,25 @@ spec:
               - key: nvidia.com/gpu.product
                 operator: In
                 values:
-                - NVIDIA-A10               # 24 GB VRAM, 34 nodes across east+central
-                - NVIDIA-GeForce-RTX-3090  # 24 GB VRAM, 49 nodes across west+central+east
-                - NVIDIA-RTX-A6000         # 48 GB VRAM, fallback
-                - NVIDIA-L40               # 48 GB VRAM, fallback
+                - NVIDIA-A10
+                - NVIDIA-A40
+                - NVIDIA-RTX-A6000
+                - NVIDIA-L40
+                - NVIDIA-L40S
+                - NVIDIA-L4
+                - NVIDIA-GeForce-RTX-4090
+                - NVIDIA-GeForce-RTX-3090
+                - NVIDIA-RTX-A5000
+                - Tesla-V100-SXM2-32GB
+                - Tesla-V100-PCIE-16GB
+                - NVIDIA-TITAN-RTX
+                - NVIDIA-GeForce-RTX-2080-Ti
+                - Tesla-T4
+                - Quadro-RTX-8000
+                - Quadro-RTX-6000
+                - NVIDIA-RTX-5000-Ada-Generation
+                - NVIDIA-A2
+                - Tesla-V100-SXM2-16GB
           preferredDuringSchedulingIgnoredDuringExecution:
           - weight: 100
             preference:

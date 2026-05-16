@@ -85,51 +85,56 @@ def process_batch(batch, scalpel, cpu_pool, device, temperature):
 
 
 def main():
-    TRAIN_PATH  = "/data/nas-gpu/wang/tmach007/data/MSnLib/splits_v2/train.parquet"
-    OUTPUT_PATH = "/data/nas-gpu/wang/tmach007/data/MSnLib/splits_v2/train_soft_labels.parquet"
-    CKPT_PATH   = "/data/nas-gpu/wang/tmach007/ms-pred/weights/nist_iceberg_generate.ckpt"
+    import argparse
+    parser = argparse.ArgumentParser(description="Soft-Label Generation Pipeline (Sharded)")
+    parser.add_argument("--input",      type=str,   required=True,       help="Path to input parquet shard")
+    parser.add_argument("--output",     type=str,   required=True,       help="Path to output parquet shard")
+    parser.add_argument("--device",     type=str,   required=True,       help="Target GPU (e.g., cuda:0 or cuda:1)")
+    parser.add_argument("--workers",    type=int,   default=14,          help="Number of CPU workers for MAGMa")
+    parser.add_argument("--max_batches",type=int,   default=None,        help="Debug batch limit (None for all)")
+    parser.add_argument("--temp",       type=float, default=0.1,         help="Softmax temperature")
+    args = parser.parse_args()
 
-    TEMPERATURE = 0.1
-    BATCH_SIZE  = 128
-    MAX_BATCHES = 100
+    CKPT_PATH  = "/data/nas-gpu/wang/tmach007/ms-pred/weights/nist_iceberg_generate.ckpt"
+    BATCH_SIZE = 128
 
-    CPU_WORKERS = 20
-
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-
-    device   = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cpu_pool = mp.Pool(processes=CPU_WORKERS)
+    device   = torch.device(args.device)
+    torch.cuda.set_device(device)  # required for sparse tensor ops on non-primary GPU
+    cpu_pool = mp.Pool(processes=args.workers)
 
     print("=" * 60)
-    print("Soft-Label Generation Pipeline")
-    print(f"  Hardware    : {CPU_WORKERS} CPU Cores | {device}")
-    print(f"  Temperature : {TEMPERATURE}")
-    print(f"  Max Batches : {MAX_BATCHES if MAX_BATCHES else 'ALL'}")
+    print(f"Soft-Label Pipeline | Target: {args.device}")
+    print(f"  Input       : {args.input}")
+    print(f"  Output      : {args.output}")
+    print(f"  CPU Workers : {args.workers}")
+    print(f"  Temperature : {args.temp}")
     print("=" * 60)
 
-    dataset    = MS3DistillationDataset(TRAIN_PATH)
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+
+    dataset    = MS3DistillationDataset(args.input)
     dataloader = DataLoader(
         dataset,
-        batch_size  = BATCH_SIZE,
-        shuffle     = False,
-        collate_fn  = collate_actor_oracle,
+        batch_size = BATCH_SIZE,
+        shuffle    = False,
+        collate_fn = collate_actor_oracle,
         num_workers = 4,
     )
 
     scalpel     = ICEBERGScalpel(ckpt_path=CKPT_PATH, device=str(device), top_k=50)
     all_results = []
 
-    for step, batch in enumerate(tqdm(dataloader, desc="Evaluating Candidates")):
-        if MAX_BATCHES and step >= MAX_BATCHES:
-            print(f"\nReached debug limit of {MAX_BATCHES} batches. Stopping generation.")
+    for step, batch in enumerate(tqdm(dataloader, desc=f"Evaluating [{args.device}]")):
+        if args.max_batches and step >= args.max_batches:
+            print(f"\nReached debug limit of {args.max_batches} batches. Stopping.")
             break
 
-        batch_results = process_batch(batch, scalpel, cpu_pool, device, TEMPERATURE)
+        batch_results = process_batch(batch, scalpel, cpu_pool, device, args.temp)
         all_results.extend(batch_results)
 
     df_final = pd.DataFrame(all_results)
-    df_final.to_parquet(OUTPUT_PATH)
-    print(f"\n✅ Saved {len(df_final)} processed molecules to {OUTPUT_PATH}")
+    df_final.to_parquet(args.output)
+    print(f"\n✅ Saved {len(df_final)} processed molecules to {args.output}")
 
     cpu_pool.close()
     cpu_pool.join()

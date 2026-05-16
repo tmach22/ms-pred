@@ -124,7 +124,7 @@ def main():
         batch_size  = BATCH_SIZE,
         shuffle     = False,
         collate_fn  = collate_actor_oracle,
-        num_workers = 4,
+        num_workers = 0,
     )
 
     scalpel     = ICEBERGScalpel(ckpt_path=CKPT_PATH, device=str(device), top_k=50)

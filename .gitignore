@@ -9,7 +9,11 @@ scratch
 
 # Large data files — hosted on HuggingFace Hub
 data/MSnLib/splits_v2/train.parquet
+data/MSnLib/splits_v2/train_shard_0.parquet
+data/MSnLib/splits_v2/train_shard_1.parquet
 data/MSnLib/splits_v2/train_soft_labels.parquet
+data/MSnLib/splits_v2/train_soft_labels_shard_0.parquet
+data/MSnLib/splits_v2/train_soft_labels_shard_1.parquet
 
 # Large intermediate/processed data — not needed for generation script
 data/MSnLib/processed_stage1_v2/

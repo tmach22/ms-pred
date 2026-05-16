@@ -53,6 +53,8 @@ class FragmentEngine(object):
             self.inchi = Chem.MolToInchi(self.mol)
             if not mol_str_canonicalized:
                 self.mol = common.canonical_mol_from_inchi(self.inchi)
+                if self.mol is None:  # InChI roundtrip failed for this molecule
+                    return
                 self.smiles = Chem.MolToSmiles(self.mol)  # canonical smiles
                 self.mol = Chem.MolFromSmiles(self.smiles)  # always use canonical smiles for mols
 
