@@ -6,9 +6,11 @@ from torch.utils.data import Dataset, DataLoader
 
 
 class MS3DistillationDataset(Dataset):
-    def __init__(self, parquet_path: str):
+    def __init__(self, parquet_path: str, max_samples: int = None):
         print(f"Loading dataset from {parquet_path}...")
         self.df = pd.read_parquet(parquet_path)
+        if max_samples is not None and len(self.df) > max_samples:
+            self.df = self.df.sample(n=max_samples, random_state=42).reset_index(drop=True)
         print(f"Dataset loaded with {len(self.df):,} rows.")
 
     def __len__(self) -> int:

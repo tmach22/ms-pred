@@ -18,14 +18,16 @@ _ICEBERG_VALID_ELEMENTS = frozenset([
     "Se", "Fe", "Co", "As", "Na", "K",
 ])
 
-CKPT_PATH      = os.environ.get("CKPT_PATH",      "/home/user/ms-pred/weights/nist_iceberg_generate.ckpt")
-TRAIN_PATH     = os.environ.get("TRAIN_PATH",     "/home/user/ms-pred/data/MSnLib/splits_v2/train.parquet")
-CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", "/home/user/ms-pred/weights/ms3_reranker/")
-TOP_K          = 50
-BATCH_SIZE     = 128
-NUM_EPOCHS     = 20
-LR             = 1e-3
-CPU_WORKERS    = int(os.environ.get("CPU_WORKERS", "20"))
+CKPT_PATH        = os.environ.get("CKPT_PATH",        "/home/user/ms-pred/weights/nist_iceberg_generate.ckpt")
+TRAIN_PATH       = os.environ.get("TRAIN_PATH",       "/home/user/ms-pred/data/MSnLib/splits_v2/train.parquet")
+CHECKPOINT_DIR   = os.environ.get("CHECKPOINT_DIR",   "/home/user/ms-pred/weights/ms3_reranker/")
+TOP_K            = 50
+BATCH_SIZE       = int(os.environ.get("BATCH_SIZE",       "128"))
+MAX_TRAIN_SAMPLES = int(os.environ.get("MAX_TRAIN_SAMPLES", "0")) or None
+NUM_EPOCHS       = 20
+LR               = 1e-3
+CPU_WORKERS      = int(os.environ.get("CPU_WORKERS", "20"))
+SAVE_EVERY_STEPS = int(os.environ.get("SAVE_EVERY_STEPS", "200"))
 
 
 class MS3ReRanker(nn.Module):
@@ -209,11 +211,13 @@ def main():
 
     print("=" * 60)
     print("Frozen Generator + Learned Scorer — Single GPU")
-    print(f"  Device       : {device}")
-    print(f"  ICEBERG ckpt : {CKPT_PATH}")
-    print(f"  Batch size   : {BATCH_SIZE}")
-    print(f"  CPU workers  : {CPU_WORKERS}")
-    print(f"  Checkpoints  : {CHECKPOINT_DIR}")
+    print(f"  Device         : {device}")
+    print(f"  ICEBERG ckpt   : {CKPT_PATH}")
+    print(f"  Batch size     : {BATCH_SIZE}")
+    print(f"  Max train samp : {MAX_TRAIN_SAMPLES or 'all'}")
+    print(f"  CPU workers    : {CPU_WORKERS}")
+    print(f"  Checkpoints    : {CHECKPOINT_DIR}")
+    print(f"  Save every     : {SAVE_EVERY_STEPS} steps")
     print("=" * 60, flush=True)
 
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -221,7 +225,7 @@ def main():
 
     VAL_PATH = os.environ.get("VAL_PATH", "/home/user/ms-pred/data/MSnLib/splits_v2/val.parquet")
 
-    train_dataset = MS3DistillationDataset(TRAIN_PATH)
+    train_dataset = MS3DistillationDataset(TRAIN_PATH, max_samples=MAX_TRAIN_SAMPLES)
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
@@ -249,7 +253,7 @@ def main():
         # Train
         train_loss, train_reward = train_epoch(
             epoch, scalpel, reranker, train_loader, optimizer, cpu_pool, device,
-            checkpoint_dir=CHECKPOINT_DIR, save_every_steps=200,
+            checkpoint_dir=CHECKPOINT_DIR, save_every_steps=SAVE_EVERY_STEPS,
         )
         avg_train_loss   = train_loss   / max(len(train_loader), 1)
         avg_train_reward = train_reward / max(len(train_loader), 1)
