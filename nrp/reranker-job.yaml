@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-reranker-v17
+  name: ms-pred-reranker-v18
   namespace: wang-bioinf
 spec:
   backoffLimit: 2

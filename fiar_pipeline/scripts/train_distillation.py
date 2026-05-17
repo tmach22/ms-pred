@@ -38,29 +38,41 @@ def make_pool() -> mp.Pool:
 
 
 def safe_starmap(pool: mp.Pool, fn, args_list: list) -> Tuple[list, mp.Pool]:
-    """Submit all tasks, collect results up to MAGMA_TIMEOUT deadline, zero stragglers.
+    """Submit all tasks, collect results as they complete, zero any past the deadline.
 
-    Never restarts the pool mid-batch — pool.terminate() after a timeout leaves
-    dangling file descriptors that deadlock the replacement pool (workers are often
-    stuck in SIGTERM-immune Java subprocesses). Instead we abandon slow AsyncResults
-    and let those workers finish in their own time; the pool recovers naturally via
-    maxtasksperchild recycling. The pool is restarted cleanly only at epoch boundaries.
+    Uses a polling loop so a slow molecule at position 0 does not block collection
+    of faster molecules behind it (the previous sequential approach wasted the full
+    300s budget on the first slow result, leaving nothing for the rest).
+    Pool is never restarted mid-batch — stuck workers drain naturally and are
+    recycled by maxtasksperchild; the pool is restarted cleanly at epoch boundaries.
     """
     async_results = [pool.apply_async(fn, args) for args in args_list]
     deadline = time.monotonic() + MAGMA_TIMEOUT
-    results = []
+    results = [None] * len(async_results)
+    pending = set(range(len(async_results)))
+
+    while pending and time.monotonic() < deadline:
+        done = set()
+        for i in pending:
+            if async_results[i].ready():
+                try:
+                    results[i] = async_results[i].get(timeout=0)
+                except Exception:
+                    results[i] = 0.0
+                done.add(i)
+        pending -= done
+        if pending:
+            time.sleep(0.05)
+
     timed_out = 0
-    for ar in async_results:
-        remaining = max(0.05, deadline - time.monotonic())
-        try:
-            results.append(ar.get(timeout=remaining))
-        except mp.TimeoutError:
-            results.append(0.0)
-            timed_out += 1
+    for i in pending:
+        results[i] = 0.0
+        timed_out += 1
+
     if timed_out:
         print(
             f"[WARN] {timed_out}/{len(args_list)} MAGMa molecules timed out "
-            f"(>{MAGMA_TIMEOUT}s total), zeroed rewards",
+            f"(>{MAGMA_TIMEOUT}s), zeroed rewards",
             flush=True,
         )
     return results, pool
