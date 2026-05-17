@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-reranker-v16
+  name: ms-pred-reranker-v17
   namespace: wang-bioinf
 spec:
   backoffLimit: 2
@@ -62,6 +62,8 @@ spec:
           value: "25"
         - name: MAGMA_TIMEOUT
           value: "300"
+        - name: RESUME_CKPT
+          value: "/workspace/results/reranker_epoch01_step00050.pt"
         resources:
           requests:
             cpu: "32"

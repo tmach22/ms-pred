@@ -1,4 +1,5 @@
 import os
+import time
 import multiprocessing as mp
 from typing import List, Tuple
 
@@ -21,6 +22,7 @@ _ICEBERG_VALID_ELEMENTS = frozenset([
 CKPT_PATH         = os.environ.get("CKPT_PATH",         "/home/user/ms-pred/weights/nist_iceberg_generate.ckpt")
 TRAIN_PATH        = os.environ.get("TRAIN_PATH",        "/home/user/ms-pred/data/MSnLib/splits_v2/train.parquet")
 CHECKPOINT_DIR    = os.environ.get("CHECKPOINT_DIR",    "/home/user/ms-pred/weights/ms3_reranker/")
+RESUME_CKPT       = os.environ.get("RESUME_CKPT",       "")   # path to a reranker .pt to warm-start from
 TOP_K             = 50
 BATCH_SIZE        = int(os.environ.get("BATCH_SIZE",        "128"))
 MAX_TRAIN_SAMPLES = int(os.environ.get("MAX_TRAIN_SAMPLES", "0")) or None
@@ -32,21 +34,36 @@ MAGMA_TIMEOUT     = int(os.environ.get("MAGMA_TIMEOUT", "300"))  # seconds per b
 
 
 def make_pool() -> mp.Pool:
-    # maxtasksperchild recycles workers periodically to prevent memory growth
     return mp.Pool(processes=CPU_WORKERS, maxtasksperchild=200)
 
 
 def safe_starmap(pool: mp.Pool, fn, args_list: list) -> Tuple[list, mp.Pool]:
-    """starmap with per-batch timeout. Restarts the pool and returns zeros on hang."""
-    try:
-        return pool.starmap_async(fn, args_list).get(timeout=MAGMA_TIMEOUT), pool
-    except mp.TimeoutError:
+    """Submit all tasks, collect results up to MAGMA_TIMEOUT deadline, zero stragglers.
+
+    Never restarts the pool mid-batch — pool.terminate() after a timeout leaves
+    dangling file descriptors that deadlock the replacement pool (workers are often
+    stuck in SIGTERM-immune Java subprocesses). Instead we abandon slow AsyncResults
+    and let those workers finish in their own time; the pool recovers naturally via
+    maxtasksperchild recycling. The pool is restarted cleanly only at epoch boundaries.
+    """
+    async_results = [pool.apply_async(fn, args) for args in args_list]
+    deadline = time.monotonic() + MAGMA_TIMEOUT
+    results = []
+    timed_out = 0
+    for ar in async_results:
+        remaining = max(0.05, deadline - time.monotonic())
+        try:
+            results.append(ar.get(timeout=remaining))
+        except mp.TimeoutError:
+            results.append(0.0)
+            timed_out += 1
+    if timed_out:
         print(
-            f"[WARN] MAGMa batch timed out after {MAGMA_TIMEOUT}s — restarting pool, zeroing batch rewards",
+            f"[WARN] {timed_out}/{len(args_list)} MAGMa molecules timed out "
+            f"(>{MAGMA_TIMEOUT}s total), zeroed rewards",
             flush=True,
         )
-        pool.terminate()
-        return [0.0] * len(args_list), make_pool()
+    return results, pool
 
 
 class MS3ReRanker(nn.Module):
@@ -248,6 +265,7 @@ def main():
     print(f"  MAGMa timeout  : {MAGMA_TIMEOUT}s/batch")
     print(f"  Checkpoints    : {CHECKPOINT_DIR}")
     print(f"  Save every     : {SAVE_EVERY_STEPS} steps")
+    print(f"  Resume ckpt    : {RESUME_CKPT or 'none (random init)'}")
     print("=" * 60, flush=True)
 
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -277,9 +295,19 @@ def main():
 
     scalpel   = ICEBERGScalpel(ckpt_path=CKPT_PATH, device=str(device), top_k=TOP_K, threshold=0.0, compute_morgan_fp=False)
     reranker  = MS3ReRanker(hidden_dims=[64, 32]).to(device)
+    if RESUME_CKPT and os.path.isfile(RESUME_CKPT):
+        reranker.load_state_dict(torch.load(RESUME_CKPT, map_location=device))
+        print(f"[RESUME] Loaded reranker weights from {RESUME_CKPT}", flush=True)
     optimizer = torch.optim.Adam(reranker.parameters(), lr=LR)
 
     for epoch in range(1, NUM_EPOCHS + 1):
+        # Restart the pool at each epoch to clear any workers stuck on timed-out
+        # MAGMa tasks from the previous epoch. Safe here because we're between
+        # GPU calls and no AsyncResults are in-flight.
+        cpu_pool.terminate()
+        cpu_pool = make_pool()
+        print(f"[POOL] Epoch {epoch}: fresh worker pool ({CPU_WORKERS} workers)", flush=True)
+
         train_loss, train_reward, cpu_pool = train_epoch(
             epoch, scalpel, reranker, train_loader, optimizer, cpu_pool, device,
             checkpoint_dir=CHECKPOINT_DIR, save_every_steps=SAVE_EVERY_STEPS,
