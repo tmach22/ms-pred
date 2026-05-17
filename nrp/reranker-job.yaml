@@ -1,0 +1,93 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ms-pred-reranker-v6
+  namespace: wang-bioinf
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 432000   # 5 days
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: reranker
+        image: continuumio/miniconda3:23.5.2-0
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - |
+          set -e
+
+          echo "=== Installing system deps ==="
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+          apt-get install -y -qq --no-install-recommends git curl && \
+          rm -rf /var/lib/apt/lists/*
+
+          echo "=== Installing mamba for fast env solve ==="
+          conda install -n base -c conda-forge mamba -y -q
+
+          echo "=== Cloning ms-pred (provides environment.yml + code) ==="
+          git clone --depth=1 https://github.com/tmach22/ms-pred.git /tmp/ms-pred
+
+          echo "=== Creating conda environment from exported spec ==="
+          mamba env create -n ms-gen -f /tmp/ms-pred/nrp/environment.yml
+
+          echo "=== Installing ms-pred into the environment ==="
+          /opt/conda/envs/ms-gen/bin/pip install --no-cache-dir -e /tmp/ms-pred
+
+          echo "=== CUDA sanity check ==="
+          /opt/conda/envs/ms-gen/bin/python -c \
+            "import torch; torch.zeros(1).cuda(); print('CUDA OK:', torch.cuda.get_device_name(0))"
+
+          echo "=== Downloading data ==="
+          mkdir -p /tmp/data /tmp/weights
+          curl -fL "https://huggingface.co/datasets/tejasjokin/ms-pred-data/resolve/main/splits_v2/train.parquet" \
+            -o /tmp/data/train.parquet
+          curl -fL "https://huggingface.co/datasets/tejasjokin/ms-pred-data/resolve/refs%2Fconvert%2Fparquet/default/validation/0000.parquet" \
+            -o /tmp/data/val.parquet
+          curl -fL "https://huggingface.co/datasets/tejasjokin/ms-pred-data/resolve/main/weights/nist_iceberg_generate.ckpt" \
+            -o /tmp/weights/nist_iceberg_generate.ckpt
+          echo "Downloads complete."
+
+          echo "=== Starting Re-Ranker training ==="
+          mkdir -p /workspace/results
+          /opt/conda/envs/ms-gen/bin/python -u \
+            /tmp/ms-pred/fiar_pipeline/scripts/train_distillation.py
+        env:
+        - name: TRAIN_PATH
+          value: "/tmp/data/train.parquet"
+        - name: VAL_PATH
+          value: "/tmp/data/val.parquet"
+        - name: CKPT_PATH
+          value: "/tmp/weights/nist_iceberg_generate.ckpt"
+        - name: CHECKPOINT_DIR
+          value: "/workspace/results"
+        - name: CPU_WORKERS
+          value: "14"
+        resources:
+          requests:
+            cpu: "16"
+            memory: "40Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "16"
+            memory: "40Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: results
+          mountPath: /workspace/results
+      volumes:
+      - name: results
+        persistentVolumeClaim:
+          claimName: ms-pred-softlabel-pvc
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - NVIDIA-A10
