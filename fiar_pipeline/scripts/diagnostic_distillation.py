@@ -31,9 +31,9 @@ from fiar_pipeline.scripts.train_distillation import (
     TOP_K,
 )
 
-TRAIN_PATH = "/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/splits_v2/train.parquet"
-VAL_PATH   = "/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/splits_v2/val.parquet"
-DIAG_DIR   = "/data/nas-gpu/wang/tmach007/ms-pred/weights/ms3_reranker_diag/"
+TRAIN_PATH = os.environ.get("TRAIN_PATH", "/home/user/ms-pred/data/MSnLib/splits_v2/train.parquet")
+VAL_PATH   = os.environ.get("VAL_PATH",   "/home/user/ms-pred/data/MSnLib/splits_v2/val.parquet")
+DIAG_DIR   = os.environ.get("DIAG_DIR",   "/home/user/ms-pred/weights/ms3_reranker_diag/")
 
 BATCH_SIZE  = 32   # small for speed
 CPU_WORKERS = 4

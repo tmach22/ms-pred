@@ -18,14 +18,14 @@ _ICEBERG_VALID_ELEMENTS = frozenset([
     "Se", "Fe", "Co", "As", "Na", "K",
 ])
 
-CKPT_PATH      = "/data/nas-gpu/wang/tmach007/ms-pred/weights/nist_iceberg_generate.ckpt"
-TRAIN_PATH     = "/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/splits_v2/train.parquet"
-CHECKPOINT_DIR = "/data/nas-gpu/wang/tmach007/ms-pred/weights/ms3_reranker/"
+CKPT_PATH      = os.environ.get("CKPT_PATH",      "/home/user/ms-pred/weights/nist_iceberg_generate.ckpt")
+TRAIN_PATH     = os.environ.get("TRAIN_PATH",     "/home/user/ms-pred/data/MSnLib/splits_v2/train.parquet")
+CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", "/home/user/ms-pred/weights/ms3_reranker/")
 TOP_K          = 50
 BATCH_SIZE     = 128
 NUM_EPOCHS     = 20
 LR             = 1e-3
-CPU_WORKERS    = 20
+CPU_WORKERS    = int(os.environ.get("CPU_WORKERS", "20"))
 
 
 class MS3ReRanker(nn.Module):
@@ -78,7 +78,7 @@ def _is_iceberg_compatible(smiles: str) -> bool:
     return all(atom.GetSymbol() in _ICEBERG_VALID_ELEMENTS for atom in mol.GetAtoms())
 
 
-def train_epoch(epoch: int, scalpel: ICEBERGScalpel, reranker: nn.Module, dataloader: DataLoader, optimizer: torch.optim.Optimizer, cpu_pool: mp.Pool, device: torch.device):
+def train_epoch(epoch: int, scalpel: ICEBERGScalpel, reranker: nn.Module, dataloader: DataLoader, optimizer: torch.optim.Optimizer, cpu_pool: mp.Pool, device: torch.device, checkpoint_dir: str = None, save_every_steps: int = 200):
     reranker.train()
     criterion = nn.MSELoss()
     total_loss = 0.0
@@ -128,6 +128,11 @@ def train_epoch(epoch: int, scalpel: ICEBERGScalpel, reranker: nn.Module, datalo
 
         if step % 10 == 0:
             print(f"Epoch {epoch:02d} | Step {step:04d} | MSE Loss: {loss.item():.4f} | Avg MAGMa: {rewards_tensor.mean().item():.4f} | Pred mean: {predicted_scores.mean().item():.4f}", flush=True)
+
+        if checkpoint_dir and save_every_steps and (step + 1) % save_every_steps == 0:
+            step_path = os.path.join(checkpoint_dir, f"reranker_epoch{epoch:02d}_step{step+1:05d}.pt")
+            torch.save(reranker.state_dict(), step_path)
+            print(f"[CKPT] Step checkpoint: {step_path}", flush=True)
 
     return total_loss, total_reward
 
@@ -214,7 +219,7 @@ def main():
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     best_loss = float('inf')
 
-    VAL_PATH = "/data/nas-gpu/wang/tmach007/ms-pred/data/MSnLib/splits_v2/val.parquet"
+    VAL_PATH = os.environ.get("VAL_PATH", "/home/user/ms-pred/data/MSnLib/splits_v2/val.parquet")
 
     train_dataset = MS3DistillationDataset(TRAIN_PATH)
     train_loader = DataLoader(
@@ -244,6 +249,7 @@ def main():
         # Train
         train_loss, train_reward = train_epoch(
             epoch, scalpel, reranker, train_loader, optimizer, cpu_pool, device,
+            checkpoint_dir=CHECKPOINT_DIR, save_every_steps=200,
         )
         avg_train_loss   = train_loss   / max(len(train_loader), 1)
         avg_train_reward = train_reward / max(len(train_loader), 1)
