@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-reranker-v15
+  name: ms-pred-reranker-v16
   namespace: wang-bioinf
 spec:
   backoffLimit: 2
@@ -60,6 +60,8 @@ spec:
           value: "32000"
         - name: SAVE_EVERY_STEPS
           value: "25"
+        - name: MAGMA_TIMEOUT
+          value: "300"
         resources:
           requests:
             cpu: "32"
