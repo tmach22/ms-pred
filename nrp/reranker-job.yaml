@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-reranker-v6
+  name: ms-pred-reranker-v7
   namespace: wang-bioinf
 spec:
   backoffLimit: 2
@@ -22,7 +22,7 @@ spec:
 
           echo "=== Installing system deps ==="
           DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
-          apt-get install -y -qq --no-install-recommends git curl && \
+          apt-get install -y -qq --no-install-recommends git curl build-essential && \
           rm -rf /var/lib/apt/lists/*
 
           echo "=== Installing mamba for fast env solve ==="
