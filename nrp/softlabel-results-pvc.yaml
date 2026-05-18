@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: softlabel-results-pvc
+  namespace: wang-bioinf
+  labels:
+    user: tejas
+    project: fiar-ms3
+    stage: softlabel-gen
+spec:
+  storageClassName: rook-cephfs   # RWX — all 8 shards write simultaneously
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi               # 8 shards × ~1GB each (generous upper bound)

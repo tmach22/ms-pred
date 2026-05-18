@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-cpu
+  namespace: wang-bioinf
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: test
+        image: python:3.11-slim
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -c
+        - |
+          import platform, os, sys
+          print(f"Node     : {platform.node()}")
+          print(f"Python   : {sys.version.split()[0]}")
+          print(f"CPU cores: {os.cpu_count()}")
+          print("CPU test PASSED")
+        resources:
+          requests:
+            cpu: "1"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values: ["us-west"]
