@@ -26,6 +26,7 @@ RESUME_CKPT       = os.environ.get("RESUME_CKPT",       "")   # path to a rerank
 TOP_K             = 50
 BATCH_SIZE        = int(os.environ.get("BATCH_SIZE",        "128"))
 MAX_TRAIN_SAMPLES = int(os.environ.get("MAX_TRAIN_SAMPLES", "0")) or None
+MAX_VAL_SAMPLES   = int(os.environ.get("MAX_VAL_SAMPLES",   "0")) or None
 NUM_EPOCHS        = 20
 LR                = 1e-3
 CPU_WORKERS       = int(os.environ.get("CPU_WORKERS",   "20"))
@@ -162,9 +163,13 @@ def train_epoch(
         valid_mzs     = [mzs_list[i]   for i in valid_indices]
 
         with torch.no_grad():
-            valid_frags = scalpel.extract_batch(
-                smiles_list=valid_smiles, collision_engs=valid_ces, precursor_mzs=valid_mzs
-            ) if valid_smiles else []
+            try:
+                valid_frags = scalpel.extract_batch(
+                    smiles_list=valid_smiles, collision_engs=valid_ces, precursor_mzs=valid_mzs
+                ) if valid_smiles else []
+            except Exception as e:
+                print(f"[WARN] scalpel.extract_batch error: {e!r}, zeroing batch frags", flush=True)
+                valid_frags = [[] for _ in valid_smiles]
 
         frag_iter      = iter(valid_frags)
         frag_lists     = [next(frag_iter) if v else [] for v in valid_mask]
@@ -235,9 +240,13 @@ def evaluate_epoch(
             valid_ces     = [ces_list[i]    for i in valid_indices]
             valid_mzs     = [mzs_list[i]   for i in valid_indices]
 
-            valid_frags = scalpel.extract_batch(
-                smiles_list=valid_smiles, collision_engs=valid_ces, precursor_mzs=valid_mzs
-            ) if valid_smiles else []
+            try:
+                valid_frags = scalpel.extract_batch(
+                    smiles_list=valid_smiles, collision_engs=valid_ces, precursor_mzs=valid_mzs
+                ) if valid_smiles else []
+            except Exception as e:
+                print(f"[WARN] scalpel.extract_batch error: {e!r}, zeroing batch frags", flush=True)
+                valid_frags = [[] for _ in valid_smiles]
 
             frag_iter        = iter(valid_frags)
             frag_lists       = [next(frag_iter) if v else [] for v in valid_mask]
@@ -273,6 +282,7 @@ def main():
     print(f"  ICEBERG ckpt   : {CKPT_PATH}")
     print(f"  Batch size     : {BATCH_SIZE}")
     print(f"  Max train samp : {MAX_TRAIN_SAMPLES or 'all'}")
+    print(f"  Max val samp   : {MAX_VAL_SAMPLES or 'all'}")
     print(f"  CPU workers    : {CPU_WORKERS}")
     print(f"  MAGMa timeout  : {MAGMA_TIMEOUT}s/batch")
     print(f"  Checkpoints    : {CHECKPOINT_DIR}")
@@ -295,7 +305,7 @@ def main():
         pin_memory=True,
     )
 
-    val_dataset = MS3DistillationDataset(VAL_PATH)
+    val_dataset = MS3DistillationDataset(VAL_PATH, max_samples=MAX_VAL_SAMPLES)
     val_loader  = DataLoader(
         val_dataset,
         batch_size=BATCH_SIZE,

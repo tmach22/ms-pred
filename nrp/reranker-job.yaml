@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ms-pred-reranker-v19
+  name: ms-pred-reranker-v20
   namespace: wang-bioinf
 spec:
   backoffLimit: 2
@@ -53,24 +53,26 @@ spec:
         - name: CHECKPOINT_DIR
           value: "/workspace/results"
         - name: CPU_WORKERS
-          value: "28"
+          value: "20"
         - name: BATCH_SIZE
           value: "256"
         - name: MAX_TRAIN_SAMPLES
           value: "32000"
+        - name: MAX_VAL_SAMPLES
+          value: "8000"
         - name: SAVE_EVERY_STEPS
           value: "25"
         - name: MAGMA_TIMEOUT
           value: "300"
         - name: RESUME_CKPT
-          value: "/workspace/results/reranker_epoch01_step00050.pt"
+          value: "/workspace/results/reranker_epoch01_step00125.pt"
         resources:
           requests:
-            cpu: "32"
+            cpu: "24"
             memory: "40Gi"
             nvidia.com/gpu: "1"
           limits:
-            cpu: "32"
+            cpu: "24"
             memory: "40Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
